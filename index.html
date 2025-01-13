@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Room Organizer</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            height: 100vh;
+        }
+        #canvas-container {
+            flex: 3;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: #f0f0f0;
+            position: relative;
+        }
+        canvas {
+            border: 2px solid #000;
+        }
+        #sidebar {
+            flex: 1;
+            background: #ddd;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .object {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 80px;
+            height: 80px;
+            background-color: #4caf50;
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: grab;
+            user-select: none;
+            border-radius: 5px;
+        }
+        .object.chair {
+            background-color: #2196f3;
+        }
+        .object.sofa {
+            background-color: #e91e63;
+            width: 120px;
+            height: 60px;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container">
+        <canvas id="floorplan" width="1200" height="800"></canvas>
+    </div>
+    <div id="sidebar">
+        <div class="object table" draggable="true" data-type="table">Table</div>
+        <div class="object chair" draggable="true" data-type="chair">Chair</div>
+        <div class="object sofa" draggable="true" data-type="sofa">Sofa</div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById("floorplan");
+        const ctx = canvas.getContext("2d");
+
+        const objects = []; // List of draggable objects on the canvas
+
+        const floorPlanImage = new Image();
+        floorPlanImage.src = "floor_plan.png"; // Replace with your floor plan image
+        floorPlanImage.onload = () => {
+            // Maintain aspect ratio
+            const imageAspectRatio = floorPlanImage.width / floorPlanImage.height;
+            const canvasAspectRatio = canvas.width / canvas.height;
+
+            let drawWidth, drawHeight, offsetX, offsetY;
+
+            if (imageAspectRatio > canvasAspectRatio) {
+                // Image is wider than canvas, scale by width
+                drawWidth = canvas.width;
+                drawHeight = canvas.width / imageAspectRatio;
+                offsetX = 0;
+                offsetY = (canvas.height - drawHeight) / 2; // Center vertically
+            } else {
+                // Image is taller than canvas, scale by height
+                drawHeight = canvas.height;
+                drawWidth = canvas.height * imageAspectRatio;
+                offsetX = (canvas.width - drawWidth) / 2; // Center horizontally
+                offsetY = 0;
+            }
+
+            // Draw the scaled and centered image
+            ctx.drawImage(floorPlanImage, offsetX, offsetY, drawWidth, drawHeight);
+        };
+
+        let draggedObject = null;
+
+        // Sidebar drag-and-drop
+        document.querySelectorAll(".object").forEach(object => {
+            object.addEventListener("dragstart", (e) => {
+                draggedObject = {
+                    type: e.target.dataset.type,
+                    x: 0,
+                    y: 0,
+                    width: e.target.offsetWidth,
+                    height: e.target.offsetHeight,
+                    color: window.getComputedStyle(e.target).backgroundColor
+                };
+            });
+        });
+
+        // Canvas drag-and-drop
+        canvas.addEventListener("dragover", (e) => e.preventDefault());
+
+        canvas.addEventListener("drop", (e) => {
+            if (draggedObject) {
+                // Calculate drop position relative to the canvas
+                const rect = canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+
+                // Add the object to the canvas
+                objects.push({ ...draggedObject, x, y });
+                draggedObject = null;
+                render();
+            }
+        });
+
+        // Canvas mouse dragging for existing objects
+        let selectedObject = null;
+        let offsetX = 0;
+        let offsetY = 0;
+
+        canvas.addEventListener("mousedown", (e) => {
+            const { offsetX: x, offsetY: y } = e;
+
+            // Check if an object is clicked
+            selectedObject = objects.find(obj =>
+                x > obj.x && x < obj.x + obj.width &&
+                y > obj.y && y < obj.y + obj.height
+            );
+
+            if (selectedObject) {
+                offsetX = x - selectedObject.x;
+                offsetY = y - selectedObject.y;
+            }
+        });
+
+        canvas.addEventListener("mousemove", (e) => {
+            if (selectedObject) {
+                const { offsetX: x, offsetY: y } = e;
+                selectedObject.x = x - offsetX;
+                selectedObject.y = y - offsetY;
+                render();
+            }
+        });
+
+        canvas.addEventListener("mouseup", () => {
+            selectedObject = null;
+        });
+
+        // Render the floor plan and objects
+        function render() {
+            // Clear the canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Redraw the floor plan
+            const imageAspectRatio = floorPlanImage.width / floorPlanImage.height;
+            const canvasAspectRatio = canvas.width / canvas.height;
+
+            let drawWidth, drawHeight, offsetX, offsetY;
+
+            if (imageAspectRatio > canvasAspectRatio) {
+                drawWidth = canvas.width;
+                drawHeight = canvas.width / imageAspectRatio;
+                offsetX = 0;
+                offsetY = (canvas.height - drawHeight) / 2;
+            } else {
+                drawHeight = canvas.height;
+                drawWidth = canvas.height * imageAspectRatio;
+                offsetX = (canvas.width - drawWidth) / 2;
+                offsetY = 0;
+            }
+
+            ctx.drawImage(floorPlanImage, offsetX, offsetY, drawWidth, drawHeight);
+
+            // Draw all objects
+            for (const obj of objects) {
+                ctx.fillStyle = obj.color;
+                ctx.fillRect(obj.x, obj.y, obj.width, obj.height);
+
+                // Draw text for object type
+                ctx.fillStyle = "white";
+                ctx.font = "14px Arial";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText(obj.type, obj.x + obj.width / 2, obj.y + obj.height / 2);
+            }
+        }
+    </script>
+</body>
+</html>
