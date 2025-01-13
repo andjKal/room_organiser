@@ -1,205 +1,413 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Room Organizer</title>
-    <style>
-        body {
-            margin: 0;
-            display: flex;
-            height: 100vh;
-        }
-        #canvas-container {
-            flex: 3;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            background: #f0f0f0;
-            position: relative;
-        }
-        canvas {
-            border: 2px solid #000;
-        }
-        #sidebar {
-            flex: 1;
-            background: #ddd;
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
-        .object {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            width: 80px;
-            height: 80px;
-            background-color: #4caf50;
-            color: white;
-            font-size: 16px;
-            font-weight: bold;
-            cursor: grab;
-            user-select: none;
-            border-radius: 5px;
-        }
-        .object.chair {
-            background-color: #2196f3;
-        }
-        .object.sofa {
-            background-color: #e91e63;
-            width: 120px;
-            height: 60px;
-        }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Room Organizer (Fixed OBB SAT)</title>
+  <style>
+    body {
+      margin: 0;
+      display: flex;
+      height: 100vh;
+    }
+    #canvas-container {
+      flex: 3;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #f0f0f0;
+      position: relative;
+    }
+    canvas {
+      border: 2px solid #000;
+    }
+    #sidebar {
+      flex: 1;
+      background: #ddd;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .object {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px;
+      background-color: #eee;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+      cursor: grab;
+    }
+    .object img {
+      width: 40px;
+      height: 40px;
+      border-radius: 5px;
+    }
+    .object span {
+      font-size: 14px;
+      font-weight: bold;
+    }
+  </style>
 </head>
 <body>
-    <div id="canvas-container">
-        <canvas id="floorplan" width="1200" height="800"></canvas>
+  <div id="canvas-container">
+    <canvas id="floorplan" width="1200" height="800"></canvas>
+  </div>
+  <div id="sidebar">
+    <!-- Instructions Section -->
+    <div id="instructions">
+      <h2>Room Organizer Instructions</h2>
+      <ul>
+        <li><strong>Drag & Drop:</strong> Click and drag an object from the list into the floor plan.</li>
+        <li><strong>Move Objects:</strong> Click and drag an object on the floor plan to reposition it.</li>
+        <li><strong>Rotate Objects:</strong> Right-click on an object in the floor plan to rotate it by 15° clockwise.</li>
+        <li><strong>Spacing Rules:</strong> Objects will automatically adjust to maintain spacing and avoid overlapping.</li>
+      </ul>
     </div>
-    <div id="sidebar">
-        <div class="object table" draggable="true" data-type="table">Table</div>
-        <div class="object chair" draggable="true" data-type="chair">Chair</div>
-        <div class="object sofa" draggable="true" data-type="sofa">Sofa</div>
+    
+    <!-- Objects in the sidebar -->
+    <div class="object" draggable="true" data-type="Table" data-width="200" data-height="100">
+      <img src="table.png" alt="Table">
+      <span>Table (200×100 cm)</span>
     </div>
+    <div class="object" draggable="true" data-type="Chair" data-width="50" data-height="50">
+      <img src="chair.png" alt="Chair">
+      <span>Chair (50×50 cm)</span>
+    </div>
+    <div class="object" draggable="true" data-type="Sofa" data-width="300" data-height="150">
+      <img src="sofa.png" alt="Sofa">
+      <span>Sofa (300×150 cm)</span>
+    </div>
+  </div>
 
-    <script>
-        const canvas = document.getElementById("floorplan");
-        const ctx = canvas.getContext("2d");
+  <script>
+    const canvas = document.getElementById("floorplan");
+    const ctx = canvas.getContext("2d");
 
-        const objects = []; // List of draggable objects on the canvas
+    const realWorldScale = 2;  // 1 pixel = 2 cm
+    const spacing = 10;        // Required spacing (pixels) between objects
+    const objects = [];        // List of placed/dragged objects on the canvas
 
-        const floorPlanImage = new Image();
-        floorPlanImage.src = "floor_plan.png"; // Replace with your floor plan image
-        floorPlanImage.onload = () => {
-            // Maintain aspect ratio
-            const imageAspectRatio = floorPlanImage.width / floorPlanImage.height;
-            const canvasAspectRatio = canvas.width / canvas.height;
+    // Load the floor plan image (replace with your own path if desired).
+    const floorPlanImage = new Image();
+    floorPlanImage.src = "floor_plan.png";
+    floorPlanImage.onload = () => render();
 
-            let drawWidth, drawHeight, offsetX, offsetY;
+    // Temporary references for drag logic.
+    let draggedObject = null;
+    let selectedObject = null;
+    let offsetX = 0;
+    let offsetY = 0;
 
-            if (imageAspectRatio > canvasAspectRatio) {
-                // Image is wider than canvas, scale by width
-                drawWidth = canvas.width;
-                drawHeight = canvas.width / imageAspectRatio;
-                offsetX = 0;
-                offsetY = (canvas.height - drawHeight) / 2; // Center vertically
-            } else {
-                // Image is taller than canvas, scale by height
-                drawHeight = canvas.height;
-                drawWidth = canvas.height * imageAspectRatio;
-                offsetX = (canvas.width - drawWidth) / 2; // Center horizontally
-                offsetY = 0;
-            }
-
-            // Draw the scaled and centered image
-            ctx.drawImage(floorPlanImage, offsetX, offsetY, drawWidth, drawHeight);
+    // --- SIDEBAR DRAG-AND-DROP ---
+    document.querySelectorAll(".object").forEach(elem => {
+      elem.addEventListener("dragstart", e => {
+        const img = elem.querySelector("img");
+        draggedObject = {
+          type: elem.dataset.type,
+          x: 0,
+          y: 0,
+          width: elem.dataset.width / realWorldScale,   // cm to px
+          height: elem.dataset.height / realWorldScale, // cm to px
+          rotation: 0,  // degrees
+          image: img.src,
         };
+      });
+    });
 
-        let draggedObject = null;
+    // --- CANVAS DRAG-AND-DROP ---
+    canvas.addEventListener("dragover", e => e.preventDefault());
 
-        // Sidebar drag-and-drop
-        document.querySelectorAll(".object").forEach(object => {
-            object.addEventListener("dragstart", (e) => {
-                draggedObject = {
-                    type: e.target.dataset.type,
-                    x: 0,
-                    y: 0,
-                    width: e.target.offsetWidth,
-                    height: e.target.offsetHeight,
-                    color: window.getComputedStyle(e.target).backgroundColor
-                };
-            });
-        });
+    canvas.addEventListener("drop", e => {
+      if (draggedObject) {
+        const rect = canvas.getBoundingClientRect();
+        let x = e.clientX - rect.left;
+        let y = e.clientY - rect.top;
 
-        // Canvas drag-and-drop
-        canvas.addEventListener("dragover", (e) => e.preventDefault());
+        // Check collisions/spacings, place object.
+        const { newX, newY } = enforceSpacing(draggedObject, x, y);
+        draggedObject.x = newX;
+        draggedObject.y = newY;
 
-        canvas.addEventListener("drop", (e) => {
-            if (draggedObject) {
-                // Calculate drop position relative to the canvas
-                const rect = canvas.getBoundingClientRect();
-                const x = e.clientX - rect.left;
-                const y = e.clientY - rect.top;
+        objects.push(draggedObject);
+        draggedObject = null;
+        render();
+      }
+    });
 
-                // Add the object to the canvas
-                objects.push({ ...draggedObject, x, y });
-                draggedObject = null;
-                render();
-            }
-        });
+    // --- MOUSE INTERACTION FOR MOVING OBJECTS ON THE CANVAS ---
+    canvas.addEventListener("mousedown", e => {
+      const { offsetX: x, offsetY: y } = e;
+      
+      // Find the topmost object under the mouse (if any).
+      selectedObject = objects
+        .slice()
+        .reverse()
+        .find(obj => isPointInsideObject(x, y, obj));
 
-        // Canvas mouse dragging for existing objects
-        let selectedObject = null;
-        let offsetX = 0;
-        let offsetY = 0;
+      if (selectedObject) {
+        offsetX = x - selectedObject.x;
+        offsetY = y - selectedObject.y;
+      }
+    });
 
-        canvas.addEventListener("mousedown", (e) => {
-            const { offsetX: x, offsetY: y } = e;
+    canvas.addEventListener("mousemove", e => {
+      if (selectedObject && e.buttons === 1) {
+        let newX = e.offsetX - offsetX;
+        let newY = e.offsetY - offsetY;
 
-            // Check if an object is clicked
-            selectedObject = objects.find(obj =>
-                x > obj.x && x < obj.x + obj.width &&
-                y > obj.y && y < obj.y + obj.height
-            );
+        // Adjust position based on collisions (OBB).
+        const { newX: adjX, newY: adjY } = enforceSpacing(selectedObject, newX, newY);
+        selectedObject.x = adjX;
+        selectedObject.y = adjY;
 
-            if (selectedObject) {
-                offsetX = x - selectedObject.x;
-                offsetY = y - selectedObject.y;
-            }
-        });
+        render();
+      }
+    });
 
-        canvas.addEventListener("mousemove", (e) => {
-            if (selectedObject) {
-                const { offsetX: x, offsetY: y } = e;
-                selectedObject.x = x - offsetX;
-                selectedObject.y = y - offsetY;
-                render();
-            }
-        });
+    canvas.addEventListener("mouseup", () => {
+      selectedObject = null;
+    });
 
-        canvas.addEventListener("mouseup", () => {
-            selectedObject = null;
-        });
+    // --- RIGHT-CLICK TO ROTATE ---
+    canvas.addEventListener("contextmenu", e => {
+      e.preventDefault();
+      const { offsetX: x, offsetY: y } = e;
 
-        // Render the floor plan and objects
-        function render() {
-            // Clear the canvas
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const clickedObject = objects
+        .slice()
+        .reverse()
+        .find(obj => isPointInsideObject(x, y, obj));
 
-            // Redraw the floor plan
-            const imageAspectRatio = floorPlanImage.width / floorPlanImage.height;
-            const canvasAspectRatio = canvas.width / canvas.height;
+      if (clickedObject) {
+        // Rotate by 15 degrees clockwise.
+        clickedObject.rotation += 15;
+        render();
+      }
+    });
 
-            let drawWidth, drawHeight, offsetX, offsetY;
+    // --- HELPER: IS POINT INSIDE THIS OBJECT? (Using OBB corners) ---
+    function isPointInsideObject(px, py, obj) {
+      const corners = getRotatedCorners(obj, obj.x, obj.y);
+      return pointInPolygon([px, py], corners);
+    }
 
-            if (imageAspectRatio > canvasAspectRatio) {
-                drawWidth = canvas.width;
-                drawHeight = canvas.width / imageAspectRatio;
-                offsetX = 0;
-                offsetY = (canvas.height - drawHeight) / 2;
-            } else {
-                drawHeight = canvas.height;
-                drawWidth = canvas.height * imageAspectRatio;
-                offsetX = (canvas.width - drawWidth) / 2;
-                offsetY = 0;
-            }
+    function pointInPolygon(point, polygon) {
+      let [px, py] = point;
+      let inside = false;
+      for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+        const [xi, yi] = polygon[i];
+        const [xj, yj] = polygon[j];
+        const intersect = ((yi > py) !== (yj > py)) &&
+                          (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    }
 
-            ctx.drawImage(floorPlanImage, offsetX, offsetY, drawWidth, drawHeight);
+    // --- HELPER: GET ROTATED CORNERS (the actual 4 corners in world coords) ---
+    function getRotatedCorners(obj, x, y) {
+      const cx = x + obj.width / 2;
+      const cy = y + obj.height / 2;
+      const theta = (obj.rotation * Math.PI) / 180;
+      const halfW = obj.width / 2;
+      const halfH = obj.height / 2;
+      
+      // Local corners around (0,0) then rotate + translate.
+      const corners = [
+        [-halfW, -halfH],
+        [ halfW, -halfH],
+        [ halfW,  halfH],
+        [-halfW,  halfH],
+      ];
+      return corners.map(([lx, ly]) => {
+        const rx = lx * Math.cos(theta) - ly * Math.sin(theta);
+        const ry = lx * Math.sin(theta) + ly * Math.cos(theta);
+        return [rx + cx, ry + cy];
+      });
+    }
 
-            // Draw all objects
-            for (const obj of objects) {
-                ctx.fillStyle = obj.color;
-                ctx.fillRect(obj.x, obj.y, obj.width, obj.height);
+    // --- HELPER: GET NORMALS FOR A RECT (2 unique normals) ---
+    // We'll compute the edge from c1->c2 and c2->c3, then take its perpendicular.
+    // For corners [c1, c2, c3, c4], we only need edges (c2-c1) and (c3-c2).
+    // That yields 2 unique normals. (c3-c2) is parallel to (c4-c1).
+    function getAxes(corners) {
+      let axes = [];
+      // We'll do two edges: (c2 - c1), (c3 - c2)
+      for (let i = 0; i < 2; i++) {
+        let p1 = corners[i];
+        let p2 = corners[i + 1];
+        let edge = [p2[0] - p1[0], p2[1] - p1[1]];
+        // Perpendicular to edge => normal = (-edge.y, edge.x)
+        let normal = [-edge[1], edge[0]];
+        // Normalize
+        const length = Math.sqrt(normal[0]*normal[0] + normal[1]*normal[1]);
+        normal[0] /= length;
+        normal[1] /= length;
+        axes.push(normal);
+      }
+      return axes;
+    }
 
-                // Draw text for object type
-                ctx.fillStyle = "white";
-                ctx.font = "14px Arial";
-                ctx.textAlign = "center";
-                ctx.textBaseline = "middle";
-                ctx.fillText(obj.type, obj.x + obj.width / 2, obj.y + obj.height / 2);
-            }
+    // --- HELPER: PROJECT CORNERS ONTO AN AXIS (normal) => {min, max} ---
+    function projectCorners(corners, axis) {
+      let min = Infinity;
+      let max = -Infinity;
+      for (let [x, y] of corners) {
+        // dot product of the point with the axis
+        const dot = x * axis[0] + y * axis[1];
+        if (dot < min) min = dot;
+        if (dot > max) max = dot;
+      }
+      return { min, max };
+    }
+
+    // --- HELPER: CHECK OBB-OBB COLLISION & GET SMALLEST PUSH VECTOR (SAT) ---
+    function obbCollision(cornersA, cornersB) {
+      // We gather the normals from A and from B => 4 axes total for rectangles.
+      const axesA = getAxes(cornersA);
+      const axesB = getAxes(cornersB);
+      const axes = axesA.concat(axesB);
+
+      let smallestOverlap = Infinity;
+      let smallestAxis = [0, 0];
+
+      for (let axis of axes) {
+        // Project corners of A and B
+        const projA = projectCorners(cornersA, axis);
+        const projB = projectCorners(cornersB, axis);
+
+        // Overlap along this axis
+        const overlap = Math.min(projA.max, projB.max) - Math.max(projA.min, projB.min);
+        if (overlap <= 0) {
+          // No overlap => no collision at all
+          return { colliding: false, axis: [0, 0], overlap: 0 };
         }
-    </script>
+
+        if (overlap < smallestOverlap) {
+          smallestOverlap = overlap;
+          smallestAxis = axis;  // keep track of the axis with the least overlap
+        }
+      }
+
+      // If we get here, all axes overlap => collision
+      return { colliding: true, axis: smallestAxis, overlap: smallestOverlap };
+    }
+
+    // --- ENFORCE SPACING (OBB-based with normal-based SAT) ---
+    function enforceSpacing(current, newX, newY) {
+      let finalX = newX;
+      let finalY = newY;
+
+      // Place the object temporarily
+      let cornersCurr = getRotatedCorners(current, finalX, finalY);
+      // Center of current
+      const cx = average(cornersCurr.map(pt => pt[0]));
+      const cy = average(cornersCurr.map(pt => pt[1]));
+
+      // Check collision with all other objects
+      for (const other of objects) {
+        if (other === current) continue;
+
+        const cornersOther = getRotatedCorners(other, other.x, other.y);
+        const ox = average(cornersOther.map(pt => pt[0]));
+        const oy = average(cornersOther.map(pt => pt[1]));
+
+        // Check if colliding
+        const result = obbCollision(cornersCurr, cornersOther);
+        if (result.colliding) {
+          // Overlap is 'result.overlap'. We add spacing. 
+          // We can push by overlap + spacing in the direction of the normal
+          // but we must also figure out the sign (which way to push).
+          // Vector from other->current: (cx - ox, cy - oy)
+          let dir = [cx - ox, cy - oy];
+          // Dot product with axis
+          const dot = dir[0]*result.axis[0] + dir[1]*result.axis[1];
+          // sign: if dot < 0 => push in negative axis
+          const sign = dot < 0 ? -1 : 1;
+          // pushDist
+          const pushDist = result.overlap + spacing;
+          // push vector
+          const pushX = result.axis[0] * pushDist * sign;
+          const pushY = result.axis[1] * pushDist * sign;
+
+          finalX += pushX;
+          finalY += pushY;
+
+          // Update corners + center so subsequent checks use the new position
+          cornersCurr = getRotatedCorners(current, finalX, finalY);
+          // recalc center
+          const newCenter = getPolygonCenter(cornersCurr);
+          cx = newCenter[0];
+          cy = newCenter[1];
+        }
+      }
+
+      return { newX: finalX, newY: finalY };
+    }
+
+    // Average of an array
+    function average(arr) {
+      return arr.reduce((sum, val) => sum + val, 0) / arr.length;
+    }
+    // Or a quick polygon center
+    function getPolygonCenter(corners) {
+      const xs = corners.map(pt => pt[0]);
+      const ys = corners.map(pt => pt[1]);
+      return [average(xs), average(ys)];
+    }
+
+    // --- RENDER ---
+    function render() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Keep floor plan aspect ratio
+      const imageAspectRatio = floorPlanImage.width / floorPlanImage.height;
+      const canvasAspectRatio = canvas.width / canvas.height;
+
+      let drawWidth, drawHeight, offsetX, offsetY;
+
+      if (imageAspectRatio > canvasAspectRatio) {
+        drawWidth = canvas.width;
+        drawHeight = canvas.width / imageAspectRatio;
+        offsetX = 0;
+        offsetY = (canvas.height - drawHeight) / 2;
+      } else {
+        drawHeight = canvas.height;
+        drawWidth = canvas.height * imageAspectRatio;
+        offsetX = (canvas.width - drawWidth) / 2;
+        offsetY = 0;
+      }
+
+      // Draw the background floor plan.
+      ctx.drawImage(floorPlanImage, offsetX, offsetY, drawWidth, drawHeight);
+
+      // Draw each placed object.
+      for (const obj of objects) {
+        const img = new Image();
+        img.src = obj.image;
+
+        ctx.save();
+        ctx.translate(obj.x + obj.width / 2, obj.y + obj.height / 2);
+        ctx.rotate((obj.rotation * Math.PI) / 180);
+        ctx.drawImage(
+          img,
+          -obj.width / 2,
+          -obj.height / 2,
+          obj.width,
+          obj.height
+        );
+        ctx.restore();
+      }
+    }
+
+    // --- DYNAMIC RESIZING (OPTIONAL) ---
+    window.addEventListener("resize", () => {
+      canvas.width = canvas.offsetWidth;
+      canvas.height = canvas.offsetHeight;
+      render();
+    });
+  </script>
 </body>
 </html>
